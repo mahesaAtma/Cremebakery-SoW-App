@@ -19,11 +19,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Search
   const month = isValidMonthKey(sp.bulan) ? sp.bulan : undefined;
   const q = sp.q?.trim().slice(0, 100) || undefined;
 
-  const [rows, scopes, owner] = await Promise.all([
-    listTasks({ status, type, scopeId, monthKey: month, q }),
-    scopeOptions(),
-    isOwner(),
-  ]);
+  const owner = await isOwner();
+  const rows = await listTasks({ status, type, scopeId, monthKey: month, q });
+  const scopes = await scopeOptions();
 
   const months = [...new Set(scopes.map((s) => monthKey(s.month)))];
   const filtered = !!(status || type || scopeId || month || q);

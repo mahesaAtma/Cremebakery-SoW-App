@@ -1,5 +1,6 @@
 import "server-only";
-import { and, asc, desc, eq, gte, ilike, isNotNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { cache } from "react";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
   attachments,
@@ -46,74 +47,63 @@ export async function getOverview(monthKey: string) {
   const from = firstOfMonth(monthKey);
   const to = lastOfMonth(monthKey);
 
-  const [statusCounts, doneThisMonth, hoursThisMonth, scopes, inProgress, waiting, recentDone, recentComments] =
-    await Promise.all([
-      db
-        .select({ status: tasks.status, count: sql<number>`count(*)::int` })
-        .from(tasks)
-        .groupBy(tasks.status),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.status, "done"),
-            sql`(${tasks.completedAt} at time zone 'Asia/Jakarta')::date between ${from} and ${to}`,
-          ),
-        ),
-      db
-        .select({ total: sql<string>`coalesce(sum(${timeLogs.hours}), 0)` })
-        .from(timeLogs)
-        .where(and(gte(timeLogs.date, from), lte(timeLogs.date, to))),
-      listScopes(monthKey),
-      db
-        .select(taskListFields)
-        .from(tasks)
-        .leftJoin(monthlyScopes, eq(tasks.scopeId, monthlyScopes.id))
-        .where(eq(tasks.status, "in_progress"))
-        .orderBy(sql`${tasks.dueDate} asc nulls last`, asc(tasks.id)),
-      db
-        .select({ ...taskListFields, waitingSince: waitingSinceSq.as("waiting_since") })
-        .from(tasks)
-        .leftJoin(monthlyScopes, eq(tasks.scopeId, monthlyScopes.id))
-        .where(eq(tasks.status, "waiting"))
-        .orderBy(sql`waiting_since asc nulls last`),
-      db
-        .select(taskListFields)
-        .from(tasks)
-        .leftJoin(monthlyScopes, eq(tasks.scopeId, monthlyScopes.id))
-        .where(eq(tasks.status, "done"))
-        .orderBy(sql`${tasks.completedAt} desc nulls last`)
-        .limit(5),
-      db
-        .select({
-          id: comments.id,
-          authorName: comments.authorName,
-          body: comments.body,
-          isOwner: comments.isOwner,
-          createdAt: comments.createdAt,
-          taskId: comments.taskId,
-          taskTitle: tasks.title,
-        })
-        .from(comments)
-        .innerJoin(tasks, eq(comments.taskId, tasks.id))
-        .where(eq(comments.hidden, false))
-        .orderBy(desc(comments.createdAt))
-        .limit(4),
-    ]);
+  // 5 small queries instead of 8; they run one after another on a single connection
+  const [stats] = await db
+    .select({
+      inProgress: sql<number>`count(*) filter (where ${tasks.status} = 'in_progress')::int`,
+      waiting: sql<number>`count(*) filter (where ${tasks.status} = 'waiting')::int`,
+      doneThisMonth: sql<number>`count(*) filter (where ${tasks.status} = 'done' and (${tasks.completedAt} at time zone 'Asia/Jakarta')::date between ${from} and ${to})::int`,
+      hoursThisMonth: sql<string>`(select coalesce(sum(tl.hours), 0) from time_logs tl where tl.date between ${from} and ${to})`,
+    })
+    .from(tasks);
 
-  const count = (s: TaskStatus) => statusCounts.find((c) => c.status === s)?.count ?? 0;
+  const scopes = await listScopes(monthKey);
+
+  const active = await db
+    .select({ ...taskListFields, waitingSince: waitingSinceSq.as("waiting_since") })
+    .from(tasks)
+    .leftJoin(monthlyScopes, eq(tasks.scopeId, monthlyScopes.id))
+    .where(inArray(tasks.status, ["in_progress", "waiting"]))
+    .orderBy(sql`${tasks.dueDate} asc nulls last`, asc(tasks.id));
+
+  const recentDone = await db
+    .select(taskListFields)
+    .from(tasks)
+    .leftJoin(monthlyScopes, eq(tasks.scopeId, monthlyScopes.id))
+    .where(eq(tasks.status, "done"))
+    .orderBy(sql`${tasks.completedAt} desc nulls last`)
+    .limit(5);
+
+  const recentComments = await db
+    .select({
+      id: comments.id,
+      authorName: comments.authorName,
+      body: comments.body,
+      isOwner: comments.isOwner,
+      createdAt: comments.createdAt,
+      taskId: comments.taskId,
+      taskTitle: tasks.title,
+    })
+    .from(comments)
+    .innerJoin(tasks, eq(comments.taskId, tasks.id))
+    .where(eq(comments.hidden, false))
+    .orderBy(desc(comments.createdAt))
+    .limit(4);
+
+  const waitingSinceTime = (t: (typeof active)[number]) =>
+    t.waitingSince ? new Date(t.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
 
   return {
     stats: {
-      inProgress: count("in_progress"),
-      waiting: count("waiting"),
-      doneThisMonth: doneThisMonth[0]?.count ?? 0,
-      hoursThisMonth: Number(hoursThisMonth[0]?.total ?? 0),
+      inProgress: stats?.inProgress ?? 0,
+      waiting: stats?.waiting ?? 0,
+      doneThisMonth: stats?.doneThisMonth ?? 0,
+      hoursThisMonth: Number(stats?.hoursThisMonth ?? 0),
     },
     scopes,
-    inProgress,
-    waiting,
+    inProgress: active.filter((t) => t.status === "in_progress"),
+    // longest-waiting first
+    waiting: active.filter((t) => t.status === "waiting").sort((a, b) => waitingSinceTime(a) - waitingSinceTime(b)),
     recentDone,
     recentComments,
   };
@@ -197,7 +187,7 @@ export async function listTasks(f: TaskFilters = {}) {
     );
 }
 
-export async function getTask(id: number, includeHidden: boolean) {
+export const getTask = cache(async function getTask(id: number, includeHidden: boolean) {
   const [row] = await db
     .select({
       task: tasks,
@@ -210,21 +200,20 @@ export async function getTask(id: number, includeHidden: boolean) {
     .where(eq(tasks.id, id));
   if (!row) return null;
 
-  const [logs, files, commentRows, history, linkedNotes] = await Promise.all([
-    db.select().from(timeLogs).where(eq(timeLogs.taskId, id)).orderBy(desc(timeLogs.date), desc(timeLogs.id)),
-    db.select().from(attachments).where(eq(attachments.taskId, id)).orderBy(asc(attachments.id)),
-    db
-      .select()
-      .from(comments)
-      .where(includeHidden ? eq(comments.taskId, id) : and(eq(comments.taskId, id), eq(comments.hidden, false)))
-      .orderBy(asc(comments.createdAt)),
-    db.select().from(statusHistory).where(eq(statusHistory.taskId, id)).orderBy(desc(statusHistory.changedAt)),
-    db.select().from(notes).where(eq(notes.taskId, id)).orderBy(desc(notes.date)),
-  ]);
+  // one after another: see the note in src/db/index.ts
+  const logs = await db.select().from(timeLogs).where(eq(timeLogs.taskId, id)).orderBy(desc(timeLogs.date), desc(timeLogs.id));
+  const files = await db.select().from(attachments).where(eq(attachments.taskId, id)).orderBy(asc(attachments.id));
+  const commentRows = await db
+    .select()
+    .from(comments)
+    .where(includeHidden ? eq(comments.taskId, id) : and(eq(comments.taskId, id), eq(comments.hidden, false)))
+    .orderBy(asc(comments.createdAt));
+  const history = await db.select().from(statusHistory).where(eq(statusHistory.taskId, id)).orderBy(desc(statusHistory.changedAt));
+  const linkedNotes = await db.select().from(notes).where(eq(notes.taskId, id)).orderBy(desc(notes.date));
 
   const totalHours = logs.reduce((sum, l) => sum + Number(l.hours), 0);
   return { ...row, logs, files, comments: commentRows, history, notes: linkedNotes, totalHours };
-}
+});
 
 export async function taskOptions() {
   return db

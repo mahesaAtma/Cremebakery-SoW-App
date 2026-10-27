@@ -13,7 +13,8 @@ export const metadata: Metadata = { title: "Lingkup kerja" };
 export default async function ScopesPage({ searchParams }: { searchParams: Promise<{ bulan?: string }> }) {
   const sp = await searchParams;
   const month = isValidMonthKey(sp.bulan) ? sp.bulan : monthKey(todayStr());
-  const [scopes, owner] = await Promise.all([listScopes(month), isOwner()]);
+  const owner = await isOwner();
+  const scopes = await listScopes(month);
 
   return (
     <>

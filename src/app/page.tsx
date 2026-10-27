@@ -8,7 +8,8 @@ import { getOverview } from "@/lib/queries";
 export default async function OverviewPage() {
   const today = todayStr();
   const month = monthKey(today);
-  const [data, owner] = await Promise.all([getOverview(month), isOwner()]);
+  const owner = await isOwner();
+  const data = await getOverview(month);
 
   const stats = [
     { label: "Sedang dikerjakan", value: String(data.stats.inProgress), dot: "bg-blue-600" },

@@ -12,7 +12,8 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
   await ownerPage();
   const { id } = await params;
   if (!/^\d+$/.test(id)) notFound();
-  const [data, scopes] = await Promise.all([getTask(Number(id), true), scopeOptions()]);
+  const data = await getTask(Number(id), true);
+  const scopes = await scopeOptions();
   if (!data) notFound();
   const t = data.task;
 

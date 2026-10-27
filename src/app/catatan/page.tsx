@@ -12,7 +12,8 @@ export const metadata: Metadata = { title: "Catatan" };
 
 export default async function NotesPage() {
   const owner = await isOwner();
-  const [rows, tasks] = await Promise.all([listNotes(), owner ? taskOptions() : Promise.resolve([])]);
+  const rows = await listNotes();
+  const tasks = owner ? await taskOptions() : [];
 
   return (
     <>

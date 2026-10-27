@@ -11,7 +11,8 @@ export default async function EditNotePage({ params }: { params: Promise<{ id: s
   await ownerPage();
   const { id } = await params;
   if (!/^\d+$/.test(id)) notFound();
-  const [note, tasks] = await Promise.all([getNote(Number(id)), taskOptions()]);
+  const note = await getNote(Number(id));
+  const tasks = await taskOptions();
   if (!note) notFound();
 
   return (
