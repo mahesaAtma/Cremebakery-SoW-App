@@ -1,100 +1,142 @@
 # Creme Bakery · Scope of Work
 
-A small website that shows the client what is being worked on for the Creme Bakery website: what's done, in progress, waiting, planned, and under research. Visitors can only view and comment; the owner logs in to add and edit data. The interface is in Bahasa Indonesia.
+A lightweight progress site for a freelance engagement: instead of sending the client a Word report every week, the client opens one link and sees what's done, what's in progress, what's waiting on whom, and what's being researched, plus the hours behind it.
 
-**Stack:** Next.js 16 (App Router, Server Actions) · TypeScript · Tailwind CSS 4 · Drizzle ORM · Postgres on Supabase · hosted on Vercel.
+Built for the website work at Creme Bakery, a small bakery business. The interface is in Bahasa Indonesia.
 
-## Pages
+![Overview page](docs/screenshots/overview.png)
 
-| Path | What it shows |
+## Why
+
+Client reporting for part-time development work usually means a document assembled by hand at the end of the week. It's tedious to write, out of date the moment it's sent, and it hides the most useful signal: **what is blocked, and on whom**.
+
+This site replaces that document with a live view of the same data the developer already works from. The client can check in whenever they want, leave comments on specific tasks, and see exactly how long something has been waiting for their input.
+
+## Features
+
+- **Overview (Ringkasan).** Counts of active, waiting and finished work, progress against this month's goals, and the latest client comments.
+- **Timeline (Linimasa).** A Gantt-style view by month or week, grouped by monthly goal, with a marker for today. Blocked work is drawn with a dashed outline so it stands out.
+- **Tasks.** Each task has a status (backlog, planned, in progress, waiting, done) and a type (feature, maintenance, bug, research).
+  - *Waiting* tasks record who they're waiting on and why, and show how many days they've been blocked.
+  - *Research* tasks capture the question being answered and the conclusion reached.
+  - Every task can carry an optional note about its expected or observed business impact.
+- **Monthly goals (Lingkup).** Work is grouped under goals agreed for each month. Weekly and daily views are filters over the same data, so nothing is entered twice.
+- **Hours (Jam kerja).** Time logged per task, summarised by month, task, type and day.
+- **Comments.** The client can comment on any task without an account. The developer's replies are labelled, and comments can be hidden or deleted.
+- **Decision log (Catatan).** Dated notes recording what was decided and why, optionally linked to a task.
+- **Screenshots.** Optional image uploads on tasks.
+- **Status history.** Recorded automatically on every status change. This powers "waiting for 10 days" and the per-task history.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/timeline.png" alt="Timeline view" /></td>
+    <td width="28%"><img src="docs/screenshots/mobile.png" alt="Overview on a phone" /></td>
+  </tr>
+</table>
+
+![Task detail page](docs/screenshots/task.png)
+
+## Access model
+
+There are deliberately only two roles:
+
+| Role | Can do |
 |---|---|
-| `/` Ringkasan | Counts, this month's scope progress, in-progress and waiting tasks (with "waiting for N days"), recently done, latest comments |
-| `/linimasa` Linimasa | Gantt-style timeline per month or week, grouped by monthly scope, with a "today" line |
-| `/tugas` Tugas | All tasks with filters (status, type, scope, month, search) |
-| `/tugas/[id]` | Task detail: description, waiting info, research question/finding, impact note, hours, screenshots, comments, status history |
-| `/lingkup` Lingkup | Monthly scope items and their progress |
-| `/jam` Jam kerja | Hours per month, per task, per type and per day |
-| `/catatan` Catatan | Decision log / notes |
-| `/masuk` | Owner login (not linked in the menu on purpose) |
+| **Visitor** (the client, or anyone with the link) | Read everything, post comments |
+| **Owner** (the developer) | Create, edit and delete everything; moderate comments |
 
-Status history is recorded automatically every time a task's status changes. That's where "waiting for N days" and the history list come from.
+The owner signs in with a single username and password held in environment variables. There is no user table, because there is exactly one editor. A successful login sets a signed, HTTP-only cookie, and every write operation re-checks that cookie on the server.
 
----
+Public comments are protected by a hidden honeypot field and a per-visitor rate limit. Visitor IP addresses are stored only as salted hashes. Pages are marked `noindex`, so the site stays out of search engines.
 
-## 1. Create the database (Supabase)
+## Tech stack
 
-1. Go to [supabase.com](https://supabase.com), create a free project. Pick the **Singapore** region (closest to Indonesia).
-2. Open **Project Settings → Database → Connection string**, choose **Transaction pooler** (port `6543`) and copy it. Replace `[YOUR-PASSWORD]` with your database password. This is your `DATABASE_URL`.
-3. *(Optional, for screenshots)* Open **Storage → New bucket**, name it `lampiran`, and tick **Public bucket**. Then copy the **Project URL** and the **service_role** key from **Project Settings → API**. Keep the service_role key secret; it only ever lives in environment variables.
+| | |
+|---|---|
+| Framework | [Next.js 16](https://nextjs.org) (App Router, Server Components, Server Actions) |
+| Language | TypeScript |
+| Styling | [Tailwind CSS 4](https://tailwindcss.com), Inter |
+| Database | PostgreSQL on [Supabase](https://supabase.com) |
+| ORM / migrations | [Drizzle ORM](https://orm.drizzle.team) |
+| Validation | [Zod](https://zod.dev) |
+| File storage | Supabase Storage (optional) |
+| Hosting | [Vercel](https://vercel.com) |
 
-## 2. Run it locally
+There is no separate API layer. Pages read from the database in Server Components, and every change goes through a Server Action in `src/app/actions.ts`.
 
-You need Node.js 20.9 or newer.
+## Data model
 
-```bash
-npm install
-cp .env.example .env.local     # on Windows: copy .env.example .env.local
+```
+monthly_scopes ──< tasks ──< time_logs
+                     │──< status_history
+                     │──< comments
+                     │──< attachments
+                     └──< notes  (optional link)
 ```
 
-Fill in `.env.local`:
-
-| Variable | Value |
+| Table | Purpose |
 |---|---|
-| `DATABASE_URL` | Supabase transaction pooler URL from step 1 |
-| `OWNER_USERNAME` | Your login name |
-| `OWNER_PASSWORD` | A strong password |
-| `SESSION_SECRET` | 32+ random characters. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET` | Optional. Leave empty to hide screenshot uploads |
+| `monthly_scopes` | Goals agreed for a given month |
+| `tasks` | The unit of work: status, type, dates, waiting info, research fields, impact note |
+| `status_history` | Every status change, written automatically |
+| `time_logs` | Hours per task per day |
+| `comments` | Visitor and owner comments, with a hidden flag for moderation |
+| `attachments` | Uploaded screenshots |
+| `notes` | Decision log |
 
-Create the tables, then start the dev server:
-
-```bash
-npm run db:migrate
-npm run dev
-```
-
-Open http://localhost:3000, then go to http://localhost:3000/masuk to log in.
-
-## 3. Deploy to Vercel
-
-1. Push this folder to a GitHub repository (`.env.local` is git-ignored, so your secrets stay local).
-2. In Vercel: **Add New → Project**, import the repository. The framework is detected automatically.
-3. Under **Environment Variables**, add the same variables as in `.env.local`.
-4. Click **Deploy**.
-
-Migrations are not run during the Vercel build. Run `npm run db:migrate` from your computer whenever the schema changes (it reads `DATABASE_URL` from `.env.local`).
-
-Share the Vercel URL with your client. Pages are public but marked `noindex`, so they won't show up on Google.
-
-## Everyday use
-
-- **New monthly goals:** Lingkup → pick the month → *Tambah lingkup*.
-- **New task:** *+ Tugas baru*. Give it a start date and/or due date so it appears on the timeline.
-- **Blocked on someone:** set status to *Menunggu* and fill in who and what. The overview shows how many days it's been waiting.
-- **Log hours:** on the task page, under *Jam kerja* (decimal comma works, e.g. `1,5`).
-- **Comments:** visitors type their name and comment. As owner you can hide or delete any comment, and your replies are marked *Pengembang*.
-
-## Security notes
-
-- The owner login is checked against `OWNER_USERNAME` / `OWNER_PASSWORD`. A successful login sets a signed, httpOnly cookie that lasts 30 days.
-- To log out everywhere (e.g. after sharing your laptop), change `SESSION_SECRET` in Vercel and redeploy.
-- Every create/edit/delete server action checks the owner cookie on the server, so visitors can't call them directly.
-- Comment spam protection: a hidden "website" field that bots fill in (those comments are dropped silently), and a limit of 5 comments per visitor per 10 minutes. Visitor IPs are stored only as a salted hash.
-
-## Changing the database
-
-1. Edit `src/db/schema.ts`.
-2. `npm run db:generate` creates a new SQL file in `drizzle/`.
-3. `npm run db:migrate` applies it.
+The schema lives in [`src/db/schema.ts`](src/db/schema.ts), and the generated SQL migrations are in [`drizzle/`](drizzle).
 
 ## Project structure
 
 ```
 src/
-  app/            pages (one folder per URL) and actions.ts (all data changes)
-  components/     header, forms and small UI pieces
-  db/             schema.ts (tables) and the database client
-  lib/            auth, dates (WIB timezone), labels, queries, storage
-drizzle/          generated SQL migrations
-scripts/          migrate.ts
+  app/              routes (one folder per page) and actions.ts (all writes)
+  components/       header, forms and small UI primitives
+  db/               schema and database client
+  lib/              auth, date helpers (WIB timezone), labels, queries, storage
+drizzle/            SQL migrations
+scripts/migrate.ts  applies migrations
 ```
+
+## Running it yourself
+
+Requires Node.js 20.9+ and a PostgreSQL database. A free Supabase project works well; use its **transaction pooler** connection string.
+
+```bash
+npm install
+cp .env.example .env.local   # then fill in the values below
+npm run db:migrate           # creates the tables
+npm run dev                  # http://localhost:3000
+```
+
+Sign in at `/masuk`. The login page is intentionally not linked from the menu.
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | yes | Postgres connection string |
+| `OWNER_USERNAME` | yes | Owner login name |
+| `OWNER_PASSWORD` | yes | Owner password |
+| `SESSION_SECRET` | yes | Random string of 32+ characters used to sign the login cookie. Changing it signs out every session |
+| `SUPABASE_URL` | no | Supabase project URL, for screenshot uploads |
+| `SUPABASE_SERVICE_ROLE_KEY` | no | Supabase secret key, for screenshot uploads |
+| `SUPABASE_BUCKET` | no | Name of a **public** storage bucket (default `lampiran`) |
+
+Leave the three `SUPABASE_*` variables empty to turn off uploads.
+
+**Deploying:** import the repository in Vercel and add the same environment variables. If the database is in Singapore, set the Vercel function region to Singapore (`sin1`) as well. Migrations are not run during the build; apply them with `npm run db:migrate`.
+
+**Changing the schema:** edit `src/db/schema.ts`, then run `npm run db:generate` and `npm run db:migrate`.
+
+## Scripts
+
+| Command | |
+|---|---|
+| `npm run dev` | Development server |
+| `npm run build` / `npm start` | Production build and server |
+| `npm run typecheck` | TypeScript check |
+| `npm run db:generate` | Generate a migration from schema changes |
+| `npm run db:migrate` | Apply pending migrations |
+
+---
+
+Screenshots show sample data.
