@@ -128,6 +128,35 @@ export default async function OverviewPage() {
 
         <div className="grid gap-5 lg:grid-cols-2">
           <Card>
+            <CardTitle
+              dot="planned"
+              action={
+                data.stats.planned > data.planned.length ? (
+                  <Link href="/tugas?status=planned" className="text-[13px] text-muted hover:text-ink">
+                    Lihat semua ({data.stats.planned})
+                  </Link>
+                ) : null
+              }
+            >
+              Direncanakan
+            </CardTitle>
+            {data.planned.length === 0 ? (
+              <Empty>Belum ada tugas yang direncanakan.</Empty>
+            ) : (
+              data.planned.map((t) => (
+                <Link key={t.id} href={`/tugas/${t.id}`} className="block border-t border-line-soft py-3.5 hover:text-accent">
+                  <div className="font-medium">{t.title}</div>
+                  <div className="mt-0.5 text-[13px] text-muted">
+                    {TYPE[t.type]}
+                    {t.startDate ? ` · Mulai ${formatDateShort(t.startDate)}` : ""}
+                    {t.dueDate ? ` · Tenggat ${formatDateShort(t.dueDate)}` : ""}
+                  </div>
+                </Link>
+              ))
+            )}
+          </Card>
+
+          <Card>
             <CardTitle dot="done">Baru selesai</CardTitle>
             {data.recentDone.length === 0 ? (
               <Empty>Belum ada tugas selesai.</Empty>
@@ -142,23 +171,23 @@ export default async function OverviewPage() {
               ))
             )}
           </Card>
-
-          <Card>
-            <CardTitle>Komentar terbaru</CardTitle>
-            {data.recentComments.length === 0 ? (
-              <Empty>Belum ada komentar.</Empty>
-            ) : (
-              data.recentComments.map((c) => (
-                <Link key={c.id} href={`/tugas/${c.taskId}#komentar`} className="block border-t border-line-soft py-3.5">
-                  <div className="text-[13px] text-muted">
-                    <span className="font-medium text-ink">{c.authorName}</span> pada {c.taskTitle} · {timeAgo(new Date(c.createdAt))}
-                  </div>
-                  <p className="mt-1 line-clamp-2">{c.body}</p>
-                </Link>
-              ))
-            )}
-          </Card>
         </div>
+
+        <Card>
+          <CardTitle>Komentar terbaru</CardTitle>
+          {data.recentComments.length === 0 ? (
+            <Empty>Belum ada komentar.</Empty>
+          ) : (
+            data.recentComments.map((c) => (
+              <Link key={c.id} href={`/tugas/${c.taskId}#komentar`} className="block border-t border-line-soft py-3.5">
+                <div className="text-[13px] text-muted">
+                  <span className="font-medium text-ink">{c.authorName}</span> pada {c.taskTitle} · {timeAgo(new Date(c.createdAt))}
+                </div>
+                <p className="mt-1 line-clamp-2">{c.body}</p>
+              </Link>
+            ))
+          )}
+        </Card>
       </div>
     </>
   );

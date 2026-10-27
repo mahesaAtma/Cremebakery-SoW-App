@@ -43,6 +43,9 @@ export type TaskListItem = Awaited<ReturnType<typeof listTasks>>[number];
 
 // ---------------------------------------------------------------- overview
 
+/** How many planned tasks the overview lists before linking to the full list */
+export const PLANNED_LIMIT = 6;
+
 export async function getOverview(monthKey: string) {
   const from = firstOfMonth(monthKey);
   const to = lastOfMonth(monthKey);
@@ -51,6 +54,7 @@ export async function getOverview(monthKey: string) {
   const [stats] = await db
     .select({
       inProgress: sql<number>`count(*) filter (where ${tasks.status} = 'in_progress')::int`,
+      planned: sql<number>`count(*) filter (where ${tasks.status} = 'planned')::int`,
       waiting: sql<number>`count(*) filter (where ${tasks.status} = 'waiting')::int`,
       doneThisMonth: sql<number>`count(*) filter (where ${tasks.status} = 'done' and (${tasks.completedAt} at time zone 'Asia/Jakarta')::date between ${from} and ${to})::int`,
       hoursThisMonth: sql<string>`(select coalesce(sum(tl.hours), 0) from time_logs tl where tl.date between ${from} and ${to})`,
@@ -63,7 +67,7 @@ export async function getOverview(monthKey: string) {
     .select({ ...taskListFields, waitingSince: waitingSinceSq.as("waiting_since") })
     .from(tasks)
     .leftJoin(monthlyScopes, eq(tasks.scopeId, monthlyScopes.id))
-    .where(inArray(tasks.status, ["in_progress", "waiting"]))
+    .where(inArray(tasks.status, ["in_progress", "waiting", "planned"]))
     .orderBy(sql`${tasks.dueDate} asc nulls last`, asc(tasks.id));
 
   const recentDone = await db
@@ -97,6 +101,7 @@ export async function getOverview(monthKey: string) {
     stats: {
       inProgress: stats?.inProgress ?? 0,
       waiting: stats?.waiting ?? 0,
+      planned: stats?.planned ?? 0,
       doneThisMonth: stats?.doneThisMonth ?? 0,
       hoursThisMonth: Number(stats?.hoursThisMonth ?? 0),
     },
@@ -104,6 +109,11 @@ export async function getOverview(monthKey: string) {
     inProgress: active.filter((t) => t.status === "in_progress"),
     // longest-waiting first
     waiting: active.filter((t) => t.status === "waiting").sort((a, b) => waitingSinceTime(a) - waitingSinceTime(b)),
+    // soonest start first; tasks without a start date last
+    planned: active
+      .filter((t) => t.status === "planned")
+      .sort((a, b) => (a.startDate ?? "9999").localeCompare(b.startDate ?? "9999") || a.id - b.id)
+      .slice(0, PLANNED_LIMIT),
     recentDone,
     recentComments,
   };
